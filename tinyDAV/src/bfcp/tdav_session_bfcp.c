@@ -102,7 +102,7 @@ static int _tdav_session_bfcp_set(tmedia_session_t* p_self, const tmedia_param_t
         else if (tsk_striequals(param->key, "local-ip")) {
             tsk_strupdate(&p_bfcp->p_local_ip, param->value);
         }
-        else if (tsk_striequals(param->key, "local-ipver")) {
+        else if (tsk_striequals(param->key, "use-ipv6")) {
             p_bfcp->b_use_ipv6 = tsk_striequals(param->value, "ipv6");
         }
     }
@@ -404,7 +404,7 @@ static int _tdav_session_bfcp_set_ro(tmedia_session_t* p_self, const tsdp_header
         if ((A = tsdp_header_M_findA(m, "floorid"))) {
             char tmp_str[256];
             if (sscanf(A->value, "%255s %*s", tmp_str) != EOF) {
-                char *pch, *saveptr;
+                char *pch, *saveptr = NULL;
                 p_bfcp->b_conf_idf_changed |= !tsk_striequals(p_bfcp->rfc4583.floorid, tmp_str);
                 tsk_strupdate(&p_bfcp->rfc4583.floorid, tmp_str);
                 u_remote_floor_id = (uint16_t)tsk_atoi64(p_bfcp->rfc4583.floorid);

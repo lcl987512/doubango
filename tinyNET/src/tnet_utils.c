@@ -294,7 +294,7 @@ next:
     struct ifconf ifc;
 
     struct sockaddr_in *sin;
-    struct ifreq *ifr;
+    struct ifreq *ifr = NULL;
 
     if((fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
         TSK_DEBUG_ERROR("Failed to create new DGRAM socket and errno= [%d]", tnet_geterrno());
@@ -837,7 +837,7 @@ int tnet_getbestsource(const char* destination, tnet_port_t port, tnet_socket_ty
         tnet_addresses_L_t* addresses = tsk_null;
         const tsk_list_item_t* item;
 
-        if (!(addresses = tnet_get_addresses(TNET_SOCKET_TYPE_IS_IPV6(type) ? AF_INET6 : AF_INET, tsk_true, tsk_false, tsk_false, tsk_false, dwBestIfIndex))) {
+		if (!(addresses = tnet_get_addresses(destAddr.ss_family, tsk_true, tsk_false, tsk_false, tsk_false, dwBestIfIndex))) {
             ret = -2;
             TSK_DEBUG_ERROR("Failed to retrieve addresses.");
             goto bail;
@@ -962,14 +962,23 @@ int tnet_getbestsource(const char* destination, tnet_port_t port, tnet_socket_ty
         if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != destAddr.ss_family) {
             continue;
         }
+        
+        if (destAddr.ss_family == AF_INET) {
+            if (tnet_is_linklocal(ifa->ifa_addr) ^ tnet_is_linklocal(((struct sockaddr *)&destAddr))) {
+                TSK_DEBUG_INFO("Ignoring IPv4 linklocal address");
+                continue;
+            }
+        }
 
         if (destAddr.ss_family == AF_INET6) {
             if (IN6_IS_ADDR_LINKLOCAL(&((struct sockaddr_in6 *) ifa->ifa_addr)->sin6_addr) ^
                     IN6_IS_ADDR_LINKLOCAL(&((struct sockaddr_in6 *) &destAddr)->sin6_addr)) {
+                TSK_DEBUG_INFO("Ignoring IPv6 linklocal address");
                 continue;
             }
             if (IN6_IS_ADDR_SITELOCAL(&((struct sockaddr_in6 *) ifa->ifa_addr)->sin6_addr) ^
                     IN6_IS_ADDR_SITELOCAL(&((struct sockaddr_in6 *) &destAddr)->sin6_addr)) {
+                TSK_DEBUG_INFO("Ignoring IPv6 sitelocal address");
                 continue;
             }
         }
@@ -1053,33 +1062,44 @@ int tnet_getpeername(tnet_fd_t fd, struct sockaddr_storage *result)
     return -1;
 }
 
-/**@ingroup tnet_utils_group
- * Retrieves the socket type of a File Descriptor.
- * @param fd The File descriptor for which to retrive the type.
- * @retval @ref tnet_socket_type_t.
- */
-tnet_socket_type_t tnet_get_socket_type(tnet_fd_t fd)
+tnet_socket_type_t tnet_get_type(const char* host, tnet_port_t port)
 {
-    tnet_socket_type_t type = tnet_socket_type_invalid;
+	tnet_socket_type_t ret = TNET_SOCKET_TYPE_UDP;
+    if (host) {
+        int status;
+        tsk_istr_t srv;
+        struct addrinfo *result = tsk_null;
+        struct addrinfo hints;
+		const struct addrinfo *ptr = tsk_null;
 
-    /*if(fd >0)
-     {
-     struct sockaddr_storage ss;
-     if(!tnet_get_sockaddr(fd, &ss))
-     {
-     if(((struct sockaddr *)&ss)->sa_family == AF_INET)
-     {
-     TNET_SOCKET_TYPE_AS_IPV4(type);
-     }
-     else if(((struct sockaddr *)&ss)->sa_family == AF_INET6)
-     {
-     TNET_SOCKET_TYPE_AS_IPV6(type);
-     }
-     }
-     }*/
+        /* set the port: used as the default service */
+        tsk_itoa(port ? port : 5060, &srv); // service must not be empty -> Android IPv6 issue
 
-    return type;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_DGRAM;
+        hints.ai_protocol = IPPROTO_UDP;
+
+        if ((status = tnet_getaddrinfo(host, srv, &hints, &result))) {
+            TNET_PRINT_LAST_ERROR("getaddrinfo(%s:%d) failed", host, port);
+            goto done;
+        }
+     
+		for (ptr = result; ptr; ptr = ptr->ai_next) {
+			if (ptr->ai_family == AF_INET) {
+				TNET_SOCKET_TYPE_SET_IPV4(ret);
+			}
+			else if (ptr->ai_family == AF_INET6) {
+				TNET_SOCKET_TYPE_SET_IPV6(ret);
+			}
+		}
+done:
+        tnet_freeaddrinfo(result);
+    }
+
+    return ret;
 }
+
 
 /**@ingroup tnet_utils_group
  * Gets the IP family of the @a host (e.g. "google.com" or "192.168.16.104" or "::1").
@@ -1102,6 +1122,7 @@ tnet_family_t tnet_get_family(const char* host, tnet_port_t port)
             tsk_itoa(port, &srv);
         }
         else {
+            TSK_DEBUG_WARN("Empty port may lead to getaddrinfo issue on Android");
             memset(srv, '\0', sizeof(srv));
         }
 
@@ -1125,6 +1146,13 @@ done:
     }
 
     return ret;
+}
+
+tsk_bool_t tnet_is_ipv6(const char* host, tnet_port_t port)
+{
+    // getaddrinfo with empty port fails on Android, set default port to 5060
+    tnet_socket_type_t type = tnet_get_type(host, port ? port : 5060);
+	return TNET_SOCKET_TYPE_IS_IPV6(type);
 }
 
 /**@ingroup tnet_utils_group
@@ -1240,6 +1268,42 @@ int tnet_get_ip_n_port(tnet_fd_t fd, tsk_bool_t getlocal, tnet_ip_t *ip, tnet_po
 
     TSK_DEBUG_ERROR("Could not use an invalid socket description.");
     return -1;
+}
+
+/**@ingroup tnet_utils_group
+ */
+tsk_bool_t tnet_is_loopback(const struct sockaddr *sa)
+{
+    if (!sa || (sa->sa_family != AF_INET && sa->sa_family != AF_INET6)) {
+        TSK_DEBUG_ERROR("Invalid paramete");
+        return tsk_false;
+    }
+    if (sa->sa_family == AF_INET) {
+        const uint8_t* u8 = (const uint8_t*)&((const struct sockaddr_in*)sa)->sin_addr;
+        return u8[0] == 127;
+    }
+    else {
+        const uint32_t* u32 = (const uint32_t*)&((const struct sockaddr_in6*)sa)->sin6_addr;
+        return (u32[0] == 0) && (u32[4] == 0) && (u32[8] == 0) && (u32[12] == tnet_ntohl(1));
+    }
+}
+
+/**@ingroup tnet_utils_group
+ */
+tsk_bool_t tnet_is_linklocal(const struct sockaddr *sa)
+{
+    if (!sa || (sa->sa_family != AF_INET && sa->sa_family != AF_INET6)) {
+        TSK_DEBUG_ERROR("Invalid paramete");
+        return tsk_false;
+    }
+    if (sa->sa_family == AF_INET) {
+        const uint8_t* u8 = (const uint8_t*)&((const struct sockaddr_in*)sa)->sin_addr;
+        return u8[0] == 169 && u8[1] == 254;
+    }
+    else {
+        const uint8_t* u8 = (const uint8_t*)&((const struct sockaddr_in6*)sa)->sin6_addr;
+        return ((u8[0] == 0xfe) && ((u8[1] & 0xc0) == 0x80));
+    }
 }
 
 /**@ingroup tnet_utils_group

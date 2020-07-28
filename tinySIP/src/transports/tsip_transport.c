@@ -248,7 +248,7 @@ int tsip_transport_msg_update_aor(tsip_transport_t* self, tsip_message_t *msg)
 
     /* === Host and port === */
     if(msg->Contact && msg->Contact->uri) {
-        tsk_strupdate(&(msg->Contact->uri->scheme), self->scheme);
+		tsk_strupdate(&(msg->Contact->uri->scheme), self->scheme);
         msg->Contact->uri->host_type = TNET_SOCKET_TYPE_IS_IPV6(self->type) ? host_ipv6 : host_ipv4; /* for serializer ...who know? */
         tsk_params_add_param(&msg->Contact->uri->params, "transport", self->protocol);
 
@@ -921,15 +921,15 @@ int tsip_transport_init(tsip_transport_t* self, tnet_socket_type_t type, const s
     }
 
     self->stack = stack;
-    self->type = type;
     self->net_transport = tnet_transport_create(host, port, type, description);
+	self->type = tnet_transport_get_type(self->net_transport); // Type could be "ipv46" or any fancy protocol. Update it using the transport master
 
     self->scheme = "sip";
 
     if(TNET_SOCKET_TYPE_IS_STREAM(type)) {
         if(TNET_SOCKET_TYPE_IS_TLS(type)) {
-            self->scheme = "sips";
-            self->protocol = "tcp";
+            self->scheme = "sip";
+            self->protocol = "tls";
             self->via_protocol = "TLS";
             self->service = "SIPS+D2T";
         }

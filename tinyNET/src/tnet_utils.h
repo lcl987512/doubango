@@ -93,8 +93,9 @@ TINYNET_API int tnet_getaddrinfo(const char *node, const char *service, const st
 TINYNET_API void tnet_freeaddrinfo(struct addrinfo *ai);
 TINYNET_API int tnet_getsockname(tnet_fd_t fd, struct sockaddr_storage *result);
 TINYNET_API int tnet_getpeername(tnet_fd_t fd, struct sockaddr_storage *result);
-TINYNET_API tnet_socket_type_t tnet_get_socket_type(tnet_fd_t fd);
 TINYNET_API tnet_family_t tnet_get_family(const char* host, tnet_port_t port);
+TINYNET_API tnet_socket_type_t tnet_get_type(const char* host, tnet_port_t port);
+TINYNET_API tsk_bool_t tnet_is_ipv6(const char* host, tnet_port_t port);
 TINYNET_API int tnet_get_ip_n_port(tnet_fd_t fd, tsk_bool_t getlocal, tnet_ip_t *ip, tnet_port_t *port);
 TINYNET_API int tnet_get_sockip_n_port(const struct sockaddr *addr, tnet_ip_t *ip, tnet_port_t *port);
 TINYNET_API int tnet_get_peerip_n_port(tnet_fd_t localFD, tnet_ip_t *ip, tnet_port_t *port);
@@ -104,6 +105,9 @@ TINYNET_API int tnet_get_peerip_n_port(tnet_fd_t localFD, tnet_ip_t *ip, tnet_po
 #define tnet_get_sockport(addr, port) tnet_get_sockip_n_port(addr, 0, port)
 #define tnet_get_peerip(localFD, ip) tnet_get_peerip_n_port(localFD, ip, 0)
 #define tnet_get_peerport(localFD, port) tnet_get_peerip_n_port(localFD, 0, port)
+
+TINYNET_API tsk_bool_t tnet_is_loopback(const struct sockaddr *sa);
+TINYNET_API tsk_bool_t tnet_is_linklocal(const struct sockaddr *sa);
 
 #if TNET_HAVE_SA_LEN
 #	define tnet_get_sockaddr_size(psockaddr)	(psockaddr)->sa_len
